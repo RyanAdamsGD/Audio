@@ -348,9 +348,9 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 				D2D1::Point2F(0, 0),
 				D2D1_FIGURE_BEGIN_HOLLOW
 				);
-			for (int j = 0; j < channelCount; j++)
+			//for (int j = 0; j < channelCount; j++)
 			{
-				pSink->AddLines(points[j], size / channelCount);
+				pSink->AddLines(points[0], size / channelCount);
 			}
 			pSink->EndFigure(D2D1_FIGURE_END_OPEN);
 			hr = pSink->Close();
@@ -424,24 +424,29 @@ void DemoApp::Start()
 void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
 {
 	size = size / sizeof(float);
+	float unitsPerSoundPoint = 1;
+	//only render the newest data
+	//and figure out how much to render
+	size_t amountThatCanBeDrawn = (windowSize.width / unitsPerSoundPoint) * channelCount;
+	size_t amountThatWillBeDrawn = size > amountThatCanBeDrawn ? amountThatCanBeDrawn : size;
+
+	//create the buffers to store the points that will be rendered
 	D2D1_POINT_2F** channelPoints = new D2D1_POINT_2F*[channelCount];
 	for (int i = 0; i < channelCount; i++)
-		channelPoints[i] = new D2D1_POINT_2F[size / channelCount];
+		channelPoints[i] = new D2D1_POINT_2F[amountThatWillBeDrawn / channelCount];
 
-	//only render the newest data
-	size_t start = (size / channelCount) - (windowSize.width * 0.01);
-	start = start > 0 ? start : 0;
+	
 	//waves take up at most 80% of the window
 	float heightMultiplyer = windowSize.height * 0.4f;
-	for (size_t i = start, x = 0; i < size; i += channelCount, x++)
+	for (size_t i = size - amountThatWillBeDrawn, x = 0; i < size; i += channelCount, x++)
 	{
 		for (int j = 0; j < channelCount; j++)
 		{
-			channelPoints[j][x] = D2D1::Point2F(x * 10, data[i + j] * heightMultiplyer);
+			channelPoints[j][x] = D2D1::Point2F(x * unitsPerSoundPoint, data[i + j] * heightMultiplyer);
 		}
 	}
 
-	DrawPoints(channelPoints, size, channelCount);
+	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;

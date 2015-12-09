@@ -66,7 +66,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="DemoApp.cpp" />
-    <ClCompile Include="Main.cpp" />
     <ClCompile Include="stdafx.cpp" />
     <ClCompile Include="WinAudioCapture.cpp" />
   </ItemGroup>
