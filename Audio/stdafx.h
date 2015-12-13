@@ -23,6 +23,7 @@
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
 #pragma warning(pop)
+#pragma comment(lib,"Avrt.lib")
 
 
 // C RunTime Header Files:
@@ -37,6 +38,7 @@
 #include <d2d1helper.h>
 #include <dwrite.h>
 #include <wincodec.h>
+#include <sstream>
 
 extern bool DisableMMCSS;
 #ifndef _WIN32_WINNT            // Specifies that the minimum required platform is Windows Vista.
@@ -71,3 +73,10 @@ inline void SafeRelease(
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #define HINST_THISCOMPONENT ((HINSTANCE)&__ImageBase)
 #endif
+
+#define LOGERROR( s )            \
+{                             \
+   std::wostringstream os_;    \
+   os_ << s;                   \
+   OutputDebugStringW( os_.str().c_str() );  \
+}

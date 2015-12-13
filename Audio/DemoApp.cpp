@@ -1,4 +1,5 @@
 #include "DemoApp.h"
+#include "stdafx.h"
 
 void UpdateLoop(DemoApp*);
 
@@ -12,18 +13,31 @@ updateLoop(UpdateLoop, this),
 finished(false),
 captureBuffer(NULL)
 {
-	IMMDevice* device = GetDefaultDevice();
+	_CrtSetReportMode;
+	IMMDevice* device = GetDefaultCaptureDevice();
 	if (device)
 	{
-
 		capturer = new (std::nothrow) WinAudioCapture(device, true, eConsole);
 		if (capturer == NULL)
 		{
-			printf("Unable to allocate capturer\n");
+			LOGERROR("Unable to allocate capturer\n");
 			return;
 		}
 	}
-	Start(); 
+	else
+
+
+	device = GetDefaultRenderDevice();
+	if (device)
+	{
+		WinAudioRenderer *renderer = new (std::nothrow) WinAudioRenderer(device, true, eConsole);
+		if (renderer == NULL)
+		{
+			LOGERROR("Unable to allocate renderer/n");
+		}
+	}
+
+	Start();
 }
 
 
@@ -37,6 +51,13 @@ DemoApp::~DemoApp()
 	}
 	if (captureBuffer)
 		delete[]captureBuffer;
+
+	if (renderer)
+	{
+		renderer->Stop();
+		renderer->Shutdown();
+		SafeRelease(&renderer);
+	}
 
 	SafeRelease(&m_pDirect2dFactory);
 	SafeRelease(&m_pDWriteFactory);
@@ -79,7 +100,7 @@ HRESULT DemoApp::Initialize()
 		wcex.hbrBackground = NULL;
 		wcex.lpszMenuName = NULL;
 		wcex.hCursor = LoadCursor(NULL, IDI_APPLICATION);
-		wcex.lpszClassName = L"D2DDemoApp";
+		wcex.lpszClassName = "D2DDemoApp";
 
 		RegisterClassEx(&wcex);
 
@@ -95,8 +116,8 @@ HRESULT DemoApp::Initialize()
 
 		// Create the window.
 		m_hwnd = CreateWindow(
-			L"D2DDemoApp",
-			L"Direct2D Demo App",
+			"D2DDemoApp",
+			"Wave Renderer",
 			WS_OVERLAPPEDWINDOW,
 			CW_USEDEFAULT,
 			CW_USEDEFAULT,
@@ -320,6 +341,19 @@ LRESULT CALLBACK DemoApp::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 	return result;
 }
 
+void DemoApp::OnResize(UINT width, UINT height)
+{
+	if (m_pRenderTarget)
+	{
+		// Note: This method can fail, but it's okay to ignore the
+		// error here, because the error will be returned again
+		// the next time EndDraw is called.
+		windowSize.width = width;
+		windowSize.height = height;
+		m_pRenderTarget->Resize(D2D1::SizeU(width, height));
+	}
+}
+
 void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCount)
 {
 	HRESULT hr = S_OK;
@@ -344,27 +378,24 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 		hr = geometry->Open(&pSink);
 		if (SUCCEEDED(hr))
 		{
-			pSink->BeginFigure(
-				D2D1::Point2F(0, 0),
-				D2D1_FIGURE_BEGIN_HOLLOW
-				);
-			//for (int j = 0; j < channelCount; j++)
+			for (int j = 0; j < channelCount; j++)
 			{
-				pSink->AddLines(points[0], size / channelCount);
+				pSink->BeginFigure(D2D1::Point2F(0, 0), D2D1_FIGURE_BEGIN_HOLLOW);
+				pSink->AddLines(points[j], size / channelCount);
+				pSink->EndFigure(D2D1_FIGURE_END_OPEN);
 			}
-			pSink->EndFigure(D2D1_FIGURE_END_OPEN);
 			hr = pSink->Close();
 
 		}
 		//render the wave in the middle of the screen
-		m_pRenderTarget->SetTransform(D2D1::Matrix3x2F::Translation(0,windowSize.height * 0.5f));
+		m_pRenderTarget->SetTransform(D2D1::Matrix3x2F::Translation(0, (float)windowSize.height / (float)(channelCount + 1)));
 
 		m_pRenderTarget->DrawGeometry(geometry, m_pCornflowerBlueBrush, 5);
 
 		D2D1_RECT_F textLocation = D2D1::RectF(windowSize.width - 50, -25, windowSize.width, windowSize.height);
 		std::wstring text = std::to_wstring(size);
 		//static const WCHAR renderText[] = text.c_str();
-		m_pRenderTarget->DrawTextW(text.c_str(), text.length() - 1, m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
+		m_pRenderTarget->DrawText(text.c_str(), text.length(), m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
 		// Draw the outline of a rectangle.
 		hr = m_pRenderTarget->EndDraw();
 	}
@@ -376,18 +407,16 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 	}
 }
 
-
-void DemoApp::OnResize(UINT width, UINT height)
+//only call this after calling draw points
+//because I'm too laze to extract it all
+void DemoApp::DrawString(int x, int y, const std::wstring& text)
 {
-	if (m_pRenderTarget)
-	{
-		// Note: This method can fail, but it's okay to ignore the
-		// error here, because the error will be returned again
-		// the next time EndDraw is called.
-		windowSize.width = width;
-		windowSize.height = height;
-		m_pRenderTarget->Resize(D2D1::SizeU(width, height));
-	}
+	if (m_pRenderTarget == NULL)
+		return;
+	m_pRenderTarget->BeginDraw();
+	D2D1_RECT_F textLocation = D2D1::RectF(x, y, windowSize.width, windowSize.height);
+	m_pRenderTarget->DrawText(text.c_str(), text.length(), m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
+	m_pRenderTarget->EndDraw();
 }
 
 void DemoApp::Update()
@@ -399,6 +428,10 @@ void DemoApp::Update()
 	//OnRender(count++);
 	if (capturer->initialized)
 		RenderWaveData(reinterpret_cast<float*>(captureBuffer), capturer->BytesCaptured(), capturer->ChannelCount());
+
+	//swap our buffers when we get close to filling up the current buffer
+	if (captureBufferSize * 0.9f < capturer->BytesCaptured())
+		SwapAudioBuffer(10, 20);
 }
 
 void UpdateLoop(DemoApp* app)
@@ -408,9 +441,6 @@ void UpdateLoop(DemoApp* app)
 	{
 		app->Update();
 		Sleep(16);
-		timer += 16;
-		if (timer >= 10000 - 16)
-			app->StopCapture();
 	}
 }
 
@@ -419,6 +449,18 @@ void DemoApp::Start()
 	//magic numbers yay!
 	//really need to test these
 	StartCapture(10, 20);
+}
+
+void DemoApp::SwapAudioBuffer(int TargetDurationInSec, int TargetLatency)
+{
+	if (capturer->initialized)
+	{
+		if (captureBuffer)
+			delete[]captureBuffer;
+		captureBufferSize = capturer->SamplesPerSecond() * TargetDurationInSec * capturer->FrameSize();
+		captureBuffer = new (std::nothrow) BYTE[captureBufferSize];
+		capturer->SwitchBuffer(captureBuffer, captureBufferSize);
+	}
 }
 
 void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
@@ -435,24 +477,53 @@ void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
 	for (int i = 0; i < channelCount; i++)
 		channelPoints[i] = new D2D1_POINT_2F[amountThatWillBeDrawn / channelCount];
 
-	
+
 	//waves take up at most 80% of the window
-	float heightMultiplyer = windowSize.height * 0.4f;
+	float heightMultiplyer = windowSize.height * 0.8f;
+	float channelSpread = windowSize.height * 0.8f / channelCount;
 	for (size_t i = size - amountThatWillBeDrawn, x = 0; i < size; i += channelCount, x++)
 	{
 		for (int j = 0; j < channelCount; j++)
 		{
-			channelPoints[j][x] = D2D1::Point2F(x * unitsPerSoundPoint, data[i + j] * heightMultiplyer);
+			channelPoints[j][x] = D2D1::Point2F(x * unitsPerSoundPoint, data[i + j] * heightMultiplyer + j * channelSpread);
 		}
 	}
 
 	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
+	float sampleDurationInSeconds = (float)amountThatWillBeDrawn / capturer->SamplesPerSecond();
+	float frequency = FindFrequencyInHerz(reinterpret_cast<const float*>(data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds);
+	DrawString(0, 0, std::to_wstring(frequency));
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;
 }
 
-IMMDevice* DemoApp::GetDefaultDevice()
+float DemoApp::FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds) const
+{
+	if (size < 2)
+		return 0;
+
+	bool wasPositive = false;
+	bool previousState = false;
+	int numberOfCrestsAndTroughs = 0;
+
+	for (size_t i = 1; i < size; i++)
+	{
+		if (data[i] < 0.0001 && data[i] > -0.0001)
+			continue;
+		wasPositive = 0.0f > data[i];
+		if (previousState != wasPositive)
+		{
+			numberOfCrestsAndTroughs++;
+			previousState = wasPositive;
+		}
+	}
+
+	int numberOfPeriods = numberOfCrestsAndTroughs * 0.5f;
+	return numberOfPeriods / sampleDurationInSeconds;
+}
+
+IMMDevice* DemoApp::GetDefaultCaptureDevice()
 {
 	HRESULT hr;
 	IMMDeviceEnumerator *deviceEnumerator = NULL;
@@ -461,7 +532,7 @@ IMMDevice* DemoApp::GetDefaultDevice()
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&deviceEnumerator));
 	if (FAILED(hr))
 	{
-		printf("Unable to instantiate device enumerator: %x\n", hr);
+		LOGERROR("Unable to instantiate device enumerator: %x\n", hr);
 		return NULL;
 	}
 
@@ -469,7 +540,7 @@ IMMDevice* DemoApp::GetDefaultDevice()
 
 	hr = deviceEnumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
 	if (FAILED(hr))
-		printf("Unable to get default device for role %d: default device\n", hr);
+		LOGERROR("Unable to get default device for role %d: default device\n", hr);
 	SafeRelease(&deviceEnumerator);
 	return device;
 }
@@ -490,12 +561,12 @@ bool DemoApp::StartCapture(int TargetDurationInSec, int TargetLatency)
 			//  The buffer is going to contain "TargetDuration" seconds worth of PCM data.  That means 
 			//  we're going to have TargetDuration*samples/second frames multiplied by the frame size.
 			//
-			size_t captureBufferSize = capturer->SamplesPerSecond() * TargetDurationInSec * capturer->FrameSize();
+			captureBufferSize = capturer->SamplesPerSecond() * TargetDurationInSec * capturer->FrameSize();
 			captureBuffer = new (std::nothrow) BYTE[captureBufferSize];
 
 			if (captureBuffer == NULL)
 			{
-				printf("Unable to allocate capture buffer\n");
+				LOGERROR("Unable to allocate capture buffer\n");
 				return false;
 			}
 
@@ -508,4 +579,86 @@ bool DemoApp::StartCapture(int TargetDurationInSec, int TargetLatency)
 void DemoApp::StopCapture()
 {
 	capturer->Stop();
+}
+
+IMMDevice* DemoApp::GetDefaultRenderDevice()
+{
+	IMMDevice *device = NULL;
+	HRESULT hr;
+
+	IMMDeviceEnumerator *deviceEnumerator = NULL;
+	ERole deviceRole = eConsole;    // Assume we're using the console role.
+	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&deviceEnumerator));
+	if (FAILED(hr))
+	{
+		LOGERROR("Unable to create output device enumerator");
+		return NULL;
+	}
+
+	hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, deviceRole, &device);
+
+	if (FAILED(hr))
+		LOGERROR("Unable to get default device for role %d: %x\n", deviceRole, hr);
+
+	SafeRelease(&deviceEnumerator);
+	return device;
+}
+
+void DemoApp::StartAudioRender(int TargetDurationInSec, int TargetLatency)
+{
+
+	if (renderer->Initialize(TargetLatency))
+	{
+		//
+		//  We've initialized the renderer.  Once we've done that, we know some information about the
+		//  mix format and we can allocate the buffer that we're going to render.
+		//
+		//
+		//  The buffer is going to contain "TargetDuration" seconds worth of PCM data.  That means 
+		//  we're going to have TargetDuration*samples/second frames multiplied by the frame size.
+		//
+		UINT32 renderBufferSizeInBytes = (renderer->BufferSizePerPeriod()  * renderer->FrameSize());
+		size_t renderDataLength = (renderer->SamplesPerSecond() * TargetDurationInSec * renderer->FrameSize()) + (renderBufferSizeInBytes - 1);
+		size_t renderBufferCount = renderDataLength / (renderBufferSizeInBytes);
+		//
+		//  Render buffer queue. Because we need to insert each buffer at the end of the linked list instead of at the head, 
+		//  we keep a pointer to a pointer to the variable which holds the tail of the current list in currentBufferTail.
+		//
+		renderQueue = NULL;
+		currentBufferTail = &renderQueue;
+
+		double theta = 0;
+
+		for (size_t i = 0; i < renderBufferCount; i += 1)
+		{
+			RenderBuffer *renderBuffer = new (std::nothrow) RenderBuffer();
+			if (renderBuffer == NULL)
+			{
+				LOGERROR("Unable to allocate render buffer\n");
+			}
+			renderBuffer->_BufferLength = renderBufferSizeInBytes;
+			renderBuffer->_Buffer = new (std::nothrow) BYTE[renderBufferSizeInBytes];
+			if (renderBuffer->_Buffer == NULL)
+			{
+				LOGERROR("Unable to allocate render buffer\n");
+			}
+
+
+			//
+			//  Link the newly allocated and filled buffer into the queue.  
+			//
+			*currentBufferTail = renderBuffer;
+			currentBufferTail = &renderBuffer->_Next;
+		}
+
+		//
+		//  The renderer takes ownership of the render queue - it will free the items in the queue when it renders them.
+		//
+		renderer->Start(renderQueue);
+	}
+}
+
+void DemoApp::StopAudioRender()
+{
+	renderer->Stop();
 }

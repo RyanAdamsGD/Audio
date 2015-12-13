@@ -1,6 +1,7 @@
 #pragma once
 #include "stdAfx.h"
 #include "WinAudioCapture.h"
+#include "WinAudioRenderer.h"
 #include <thread>
 #include <dwrite.h>
 #pragma comment(lib,"d2d1")
@@ -23,6 +24,9 @@ public:
 	std::thread updateLoop;
 	bool StartCapture(int TargetDurationInSec, int TargetLatency);
 	void StopCapture();
+	void StopAudioRender();
+	void StartAudioRender(int TargetDurationInSec, int TargetLatency);
+	void SwapAudioBuffer(int TargetDurationInSec, int TargetLatency);
 
 private:
 	// Initialize device-independent resources.
@@ -34,10 +38,15 @@ private:
 	// Release device-dependent resource.
 	void DiscardDeviceResources();
 	
-	IMMDevice* GetDefaultDevice();
+	IMMDevice* GetDefaultCaptureDevice();
+	IMMDevice* GetDefaultRenderDevice();
 	void RenderWaveData(const float* data, int size, int channelCount);
 	void DrawPoints(D2D1_POINT_2F** const data, int size, int channelCount);
 	void Start();
+	//only call this after calling draw points
+	//because I'm too laze to extract it all
+	void DrawString(int x, int y,const std::wstring& text);
+	float FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds)const;
 
 	// Resize the render target.
 	void OnResize(
@@ -53,6 +62,7 @@ private:
 		LPARAM lParam
 		);
 
+	//d2d
 	HWND m_hwnd;
 	ID2D1Factory* m_pDirect2dFactory;
 	ID2D1HwndRenderTarget* m_pRenderTarget;
@@ -60,8 +70,16 @@ private:
 	ID2D1SolidColorBrush* m_pCornflowerBlueBrush;
 	IDWriteFactory* m_pDWriteFactory;
 	IDWriteTextFormat* m_pTextFormat;
+
+	//rendering
+	WinAudioRenderer* renderer;
+	RenderBuffer* renderQueue;
+	RenderBuffer **currentBufferTail;
+
+	//capturing
 	WinAudioCapture* capturer;
 	BYTE *captureBuffer;
+	size_t captureBufferSize;
 	D2D1_SIZE_U windowSize;
 };
 

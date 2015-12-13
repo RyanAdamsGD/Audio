@@ -21,6 +21,7 @@ public:
 	STDMETHOD_(ULONG, AddRef)();
 	STDMETHOD_(ULONG, Release)();
 	bool initialized;
+	void SwitchBuffer(BYTE *CaptureBuffer, size_t BufferSize);
 
 private:
 	~WinAudioCapture(void);  // Destructor is private to prevent accidental deletion.

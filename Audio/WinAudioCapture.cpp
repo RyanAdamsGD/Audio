@@ -50,7 +50,7 @@ bool WinAudioCapture::InitializeAudioEngine()
 
 	if (FAILED(hr))
 	{
-		printf("Unable to initialize audio client: %x.\n", hr);
+		LOGERROR("Unable to initialize audio client: %x.\n", hr);
 		return false;
 	}
 
@@ -60,21 +60,21 @@ bool WinAudioCapture::InitializeAudioEngine()
 	hr = _AudioClient->GetBufferSize(&_BufferSize);
 	if (FAILED(hr))
 	{
-		printf("Unable to get audio client buffer: %x. \n", hr);
+		LOGERROR("Unable to get audio client buffer: %x. \n", hr);
 		return false;
 	}
 
 	hr = _AudioClient->SetEventHandle(_AudioSamplesReadyEvent);
 	if (FAILED(hr))
 	{
-		printf("Unable to set ready event: %x.\n", hr);
+		LOGERROR("Unable to set ready event: %x.\n", hr);
 		return false;
 	}
 
 	hr = _AudioClient->GetService(IID_PPV_ARGS(&_CaptureClient));
 	if (FAILED(hr))
 	{
-		printf("Unable to get new capture client: %x.\n", hr);
+		LOGERROR("Unable to get new capture client: %x.\n", hr);
 		return false;
 	}
 
@@ -92,7 +92,7 @@ bool WinAudioCapture::LoadFormat()
 	HRESULT hr = _AudioClient->GetMixFormat(&_MixFormat);
 	if (FAILED(hr))
 	{
-		printf("Unable to get mix format on audio client: %x.\n", hr);
+		LOGERROR("Unable to get mix format on audio client: %x.\n", hr);
 		return false;
 	}
 
@@ -111,14 +111,14 @@ bool WinAudioCapture::Initialize(UINT32 EngineLatency)
 	_ShutdownEvent = CreateEventEx(NULL, NULL, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
 	if (_ShutdownEvent == NULL)
 	{
-		printf("Unable to create shutdown event: %d.\n", GetLastError());
+		LOGERROR("Unable to create shutdown event: %d.\n", GetLastError());
 		return false;
 	}
 
 	_AudioSamplesReadyEvent = CreateEventEx(NULL, NULL, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
 	if (_AudioSamplesReadyEvent == NULL)
 	{
-		printf("Unable to create samples ready event: %d.\n", GetLastError());
+		LOGERROR("Unable to create samples ready event: %d.\n", GetLastError());
 		return false;
 	}
 
@@ -130,7 +130,7 @@ bool WinAudioCapture::Initialize(UINT32 EngineLatency)
 	_StreamSwitchEvent = CreateEventEx(NULL, NULL, 0, EVENT_MODIFY_STATE | SYNCHRONIZE);
 	if (_StreamSwitchEvent == NULL)
 	{
-		printf("Unable to create stream switch event: %d.\n", GetLastError());
+		LOGERROR("Unable to create stream switch event: %d.\n", GetLastError());
 		return false;
 	}
 
@@ -140,14 +140,14 @@ bool WinAudioCapture::Initialize(UINT32 EngineLatency)
 	HRESULT hr = _Endpoint->Activate(__uuidof(IAudioClient), CLSCTX_INPROC_SERVER, NULL, reinterpret_cast<void **>(&_AudioClient));
 	if (FAILED(hr))
 	{
-		printf("Unable to activate audio client: %x.\n", hr);
+		LOGERROR("Unable to activate audio client: %x.\n", hr);
 		return false;
 	}
 
 	hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&_DeviceEnumerator));
 	if (FAILED(hr))
 	{
-		printf("Unable to instantiate device enumerator: %x\n", hr);
+		LOGERROR("Unable to instantiate device enumerator: %x\n", hr);
 		return false;
 	}
 
@@ -156,7 +156,7 @@ bool WinAudioCapture::Initialize(UINT32 EngineLatency)
 	//
 	if (!LoadFormat())
 	{
-		printf("Failed to load the mix format \n");
+		LOGERROR("Failed to load the mix format \n");
 		return false;
 	}
 
@@ -243,7 +243,7 @@ bool WinAudioCapture::Start(BYTE *CaptureBuffer, size_t CaptureBufferSize)
 	_CaptureThread = CreateThread(NULL, 0, WASAPICaptureThread, this, 0, NULL);
 	if (_CaptureThread == NULL)
 	{
-		printf("Unable to create transport thread: %x.", GetLastError());
+		LOGERROR("Unable to create transport thread: %x.", GetLastError());
 		return false;
 	}
 
@@ -253,12 +253,23 @@ bool WinAudioCapture::Start(BYTE *CaptureBuffer, size_t CaptureBufferSize)
 	hr = _AudioClient->Start();
 	if (FAILED(hr))
 	{
-		printf("Unable to start capture client: %x.\n", hr);
+		LOGERROR("Unable to start capture client: %x.\n", hr);
 		return false;
 	}
 
 	return true;
 }
+
+//
+//Switch the buffer that the capturer is using without stopping the process
+//
+void WinAudioCapture::SwitchBuffer(BYTE *CaptureBuffer, size_t BufferSize)
+{
+	_CaptureBuffer = CaptureBuffer;
+	_CaptureBufferSize = BufferSize;
+	_CurrentCaptureIndex = 0;
+}
+
 
 //
 //  Stop the capturer.
@@ -279,7 +290,7 @@ void WinAudioCapture::Stop()
 	hr = _AudioClient->Stop();
 	if (FAILED(hr))
 	{
-		printf("Unable to stop audio client: %x\n", hr);
+		LOGERROR("Unable to stop audio client: %x\n", hr);
 	}
 
 	if (_CaptureThread)
@@ -311,16 +322,16 @@ DWORD WinAudioCapture::DoCaptureThread()
 	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (FAILED(hr))
 	{
-		printf("Unable to initialize COM in render thread: %x\n", hr);
+		LOGERROR("Unable to initialize COM in render thread: %x\n", hr);
 		return hr;
 	}
 
 	if (!DisableMMCSS)
 	{
-		mmcssHandle = AvSetMmThreadCharacteristics(L"Audio", &mmcssTaskIndex);
+		mmcssHandle = AvSetMmThreadCharacteristics("Audio", &mmcssTaskIndex);
 		if (mmcssHandle == NULL)
 		{
-			printf("Unable to enable MMCSS on capture thread: %d\n", GetLastError());
+			LOGERROR("Unable to enable MMCSS on capture thread: %d\n", GetLastError());
 		}
 	}
 	while (stillPlaying)
@@ -388,7 +399,7 @@ DWORD WinAudioCapture::DoCaptureThread()
 				hr = _CaptureClient->ReleaseBuffer(framesAvailable);
 				if (FAILED(hr))
 				{
-					printf("Unable to release capture buffer: %x!\n", hr);
+					LOGERROR("Unable to release capture buffer: %x!\n", hr);
 				}
 			}
 			break;
@@ -412,7 +423,7 @@ bool WinAudioCapture::InitializeStreamSwitch()
 	HRESULT hr = _AudioClient->GetService(IID_PPV_ARGS(&_AudioSessionControl));
 	if (FAILED(hr))
 	{
-		printf("Unable to retrieve session control: %x\n", hr);
+		LOGERROR("Unable to retrieve session control: %x\n", hr);
 		return false;
 	}
 
@@ -422,7 +433,7 @@ bool WinAudioCapture::InitializeStreamSwitch()
 	_StreamSwitchCompleteEvent = CreateEventEx(NULL, NULL, CREATE_EVENT_INITIAL_SET | CREATE_EVENT_MANUAL_RESET, EVENT_MODIFY_STATE | SYNCHRONIZE);
 	if (_StreamSwitchCompleteEvent == NULL)
 	{
-		printf("Unable to create stream switch event: %d.\n", GetLastError());
+		LOGERROR("Unable to create stream switch event: %d.\n", GetLastError());
 		return false;
 	}
 	//
@@ -433,14 +444,14 @@ bool WinAudioCapture::InitializeStreamSwitch()
 	hr = _AudioSessionControl->RegisterAudioSessionNotification(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to register for stream switch notifications: %x\n", hr);
+		LOGERROR("Unable to register for stream switch notifications: %x\n", hr);
 		return false;
 	}
 
 	hr = _DeviceEnumerator->RegisterEndpointNotificationCallback(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to register for stream switch notifications: %x\n", hr);
+		LOGERROR("Unable to register for stream switch notifications: %x\n", hr);
 		return false;
 	}
 
@@ -452,13 +463,13 @@ void WinAudioCapture::TerminateStreamSwitch()
 	HRESULT hr = _AudioSessionControl->UnregisterAudioSessionNotification(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to unregister for session notifications: %x\n", hr);
+		LOGERROR("Unable to unregister for session notifications: %x\n", hr);
 	}
 
 	_DeviceEnumerator->UnregisterEndpointNotificationCallback(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to unregister for endpoint notifications: %x\n", hr);
+		LOGERROR("Unable to unregister for endpoint notifications: %x\n", hr);
 	}
 
 	if (_StreamSwitchCompleteEvent)
@@ -498,7 +509,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _AudioClient->Stop();
 	if (FAILED(hr))
 	{
-		printf("Unable to stop audio client during stream switch: %x\n", hr);
+		LOGERROR("Unable to stop audio client during stream switch: %x\n", hr);
 		goto ErrorExit;
 	}
 
@@ -508,7 +519,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _AudioSessionControl->UnregisterAudioSessionNotification(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to stop audio client during stream switch: %x\n", hr);
+		LOGERROR("Unable to stop audio client during stream switch: %x\n", hr);
 		goto ErrorExit;
 	}
 
@@ -533,7 +544,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	DWORD waitResult = WaitForSingleObject(_StreamSwitchCompleteEvent, 500);
 	if (waitResult == WAIT_TIMEOUT)
 	{
-		printf("Stream switch timeout - aborting...\n");
+		LOGERROR("Stream switch timeout - aborting...\n");
 		goto ErrorExit;
 	}
 
@@ -544,7 +555,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _DeviceEnumerator->GetDefaultAudioEndpoint(eCapture, _EndpointRole, &_Endpoint);
 	if (FAILED(hr))
 	{
-		printf("Unable to retrieve new default device during stream switch: %x\n", hr);
+		LOGERROR("Unable to retrieve new default device during stream switch: %x\n", hr);
 		goto ErrorExit;
 	}
 	//
@@ -553,7 +564,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _Endpoint->Activate(__uuidof(IAudioClient), CLSCTX_INPROC_SERVER, NULL, reinterpret_cast<void **>(&_AudioClient));
 	if (FAILED(hr))
 	{
-		printf("Unable to activate audio client on the new endpoint: %x.\n", hr);
+		LOGERROR("Unable to activate audio client on the new endpoint: %x.\n", hr);
 		goto ErrorExit;
 	}
 	//
@@ -563,7 +574,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _AudioClient->GetMixFormat(&wfxNew);
 	if (FAILED(hr))
 	{
-		printf("Unable to retrieve mix format for new audio client: %x.\n", hr);
+		LOGERROR("Unable to retrieve mix format for new audio client: %x.\n", hr);
 		goto ErrorExit;
 	}
 
@@ -573,7 +584,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	//
 	if (memcmp(_MixFormat, wfxNew, sizeof(WAVEFORMATEX) + wfxNew->cbSize) != 0)
 	{
-		printf("New mix format doesn't match old mix format.  Aborting.\n");
+		LOGERROR("New mix format doesn't match old mix format.  Aborting.\n");
 		CoTaskMemFree(wfxNew);
 		goto ErrorExit;
 	}
@@ -593,13 +604,13 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _AudioClient->GetService(IID_PPV_ARGS(&_AudioSessionControl));
 	if (FAILED(hr))
 	{
-		printf("Unable to retrieve session control on new audio client: %x\n", hr);
+		LOGERROR("Unable to retrieve session control on new audio client: %x\n", hr);
 		goto ErrorExit;
 	}
 	hr = _AudioSessionControl->RegisterAudioSessionNotification(this);
 	if (FAILED(hr))
 	{
-		printf("Unable to retrieve session control on new audio client: %x\n", hr);
+		LOGERROR("Unable to retrieve session control on new audio client: %x\n", hr);
 		goto ErrorExit;
 	}
 
@@ -613,7 +624,7 @@ bool WinAudioCapture::HandleStreamSwitchEvent()
 	hr = _AudioClient->Start();
 	if (FAILED(hr))
 	{
-		printf("Unable to start the new audio client: %x\n", hr);
+		LOGERROR("Unable to start the new audio client: %x\n", hr);
 		goto ErrorExit;
 	}
 

@@ -19,7 +19,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v120</PlatformToolset>
-    <CharacterSet>Unicode</CharacterSet>
+    <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -67,11 +67,13 @@
   <ItemGroup>
     <ClCompile Include="DemoApp.cpp" />
     <ClCompile Include="stdafx.cpp" />
+    <ClCompile Include="WinAudioRenderer.cpp" />
     <ClCompile Include="WinAudioCapture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DemoApp.h" />
     <ClInclude Include="stdafx.h" />
+    <ClInclude Include="WinAudioRenderer.h" />
     <ClInclude Include="WinAudioCapture.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
