@@ -1,6 +1,8 @@
 #include "DemoApp.h"
 #include "stdafx.h"
 
+#define BACKGROUND_NOISE_VOLUME 0.001f
+
 void UpdateLoop(DemoApp*);
 
 DemoApp::DemoApp() :
@@ -380,7 +382,7 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 		{
 			for (int j = 0; j < channelCount; j++)
 			{
-				pSink->BeginFigure(D2D1::Point2F(0, 0), D2D1_FIGURE_BEGIN_HOLLOW);
+				pSink->BeginFigure(points[j][0], D2D1_FIGURE_BEGIN_HOLLOW);
 				pSink->AddLines(points[j], size / channelCount);
 				pSink->EndFigure(D2D1_FIGURE_END_OPEN);
 			}
@@ -392,12 +394,18 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 
 		m_pRenderTarget->DrawGeometry(geometry, m_pCornflowerBlueBrush, 5);
 
-		D2D1_RECT_F textLocation = D2D1::RectF(windowSize.width - 50, -25, windowSize.width, windowSize.height);
-		std::wstring text = std::to_wstring(size);
 		//static const WCHAR renderText[] = text.c_str();
-		m_pRenderTarget->DrawText(text.c_str(), text.length(), m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
+		size_t stringCount = stringsToRender.size();
+		for (size_t i = 0; i < stringCount; i++)
+		{
+			DrawnString textToDraw = stringsToRender[i];
+			D2D1_RECT_F textLocation = D2D1::RectF(textToDraw.x, textToDraw.y, windowSize.width, windowSize.height);
+			m_pRenderTarget->DrawText(textToDraw.text.c_str(), textToDraw.text.length(), m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
+
+		}
 		// Draw the outline of a rectangle.
 		hr = m_pRenderTarget->EndDraw();
+		stringsToRender.clear();
 	}
 
 	if (hr == D2DERR_RECREATE_TARGET)
@@ -411,12 +419,7 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 //because I'm too laze to extract it all
 void DemoApp::DrawString(int x, int y, const std::wstring& text)
 {
-	if (m_pRenderTarget == NULL)
-		return;
-	m_pRenderTarget->BeginDraw();
-	D2D1_RECT_F textLocation = D2D1::RectF(x, y, windowSize.width, windowSize.height);
-	m_pRenderTarget->DrawText(text.c_str(), text.length(), m_pTextFormat, textLocation, m_pCornflowerBlueBrush);
-	m_pRenderTarget->EndDraw();
+	stringsToRender.push_back(DrawnString(x, y, text));
 }
 
 void DemoApp::Update()
@@ -431,7 +434,7 @@ void DemoApp::Update()
 
 	//swap our buffers when we get close to filling up the current buffer
 	if (captureBufferSize * 0.9f < capturer->BytesCaptured())
-		SwapAudioBuffer(10, 20);
+		SwapAudioBuffer();
 }
 
 void UpdateLoop(DemoApp* app)
@@ -451,14 +454,10 @@ void DemoApp::Start()
 	StartCapture(10, 20);
 }
 
-void DemoApp::SwapAudioBuffer(int TargetDurationInSec, int TargetLatency)
+void DemoApp::SwapAudioBuffer()
 {
-	if (capturer->initialized)
+	if (capturer->initialized && captureBuffer != NULL)
 	{
-		if (captureBuffer)
-			delete[]captureBuffer;
-		captureBufferSize = capturer->SamplesPerSecond() * TargetDurationInSec * capturer->FrameSize();
-		captureBuffer = new (std::nothrow) BYTE[captureBufferSize];
 		capturer->SwitchBuffer(captureBuffer, captureBufferSize);
 	}
 }
@@ -489,16 +488,19 @@ void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
 		}
 	}
 
-	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
+
+	DrawString(windowSize.width - 50, -25, std::to_wstring(amountThatWillBeDrawn));
+
 	float sampleDurationInSeconds = (float)amountThatWillBeDrawn / capturer->SamplesPerSecond();
 	float frequency = FindFrequencyInHerz(reinterpret_cast<const float*>(data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds);
 	DrawString(0, 0, std::to_wstring(frequency));
+	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;
 }
 
-float DemoApp::FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds) const
+float DemoApp::FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds)
 {
 	if (size < 2)
 		return 0;
@@ -506,18 +508,39 @@ float DemoApp::FindFrequencyInHerz(const float* const data, int size, float samp
 	bool wasPositive = false;
 	bool previousState = false;
 	int numberOfCrestsAndTroughs = 0;
+	int previousCrestOrTroughIndex = 0;
+	std::vector<float> samplesPerPeriod;
+	samplesPerPeriod.reserve(1000);
+	int samplesPerPeriodIndex = 0;
+	int previousValueWasIgnoredCount = 0;
 
 	for (size_t i = 1; i < size; i++)
 	{
-		if (data[i] < 0.0001 && data[i] > -0.0001)
+		if (data[i] < BACKGROUND_NOISE_VOLUME && data[i] > -BACKGROUND_NOISE_VOLUME)
+		{
+			//should do some logic here to not include background noise
+			//and do extra calculations because of it
+			previousValueWasIgnoredCount++;
 			continue;
+		}
+
 		wasPositive = 0.0f > data[i];
 		if (previousState != wasPositive)
 		{
+			samplesPerPeriod.push_back(0);
 			numberOfCrestsAndTroughs++;
 			previousState = wasPositive;
+			samplesPerPeriod[samplesPerPeriodIndex] = i;
 		}
 	}
+
+	int averageSamplesPerPeriod = 0;
+	size_t samplesPerPeriodSize = samplesPerPeriod.size();
+	for (size_t i = 0; i < samplesPerPeriodSize; i++)
+		averageSamplesPerPeriod += samplesPerPeriod[i];
+	if (samplesPerPeriodSize != 0)
+		averageSamplesPerPeriod /= samplesPerPeriodSize;
+	DrawString(0, 20, std::to_wstring(averageSamplesPerPeriod));
 
 	int numberOfPeriods = numberOfCrestsAndTroughs * 0.5f;
 	return numberOfPeriods / sampleDurationInSeconds;
@@ -602,6 +625,36 @@ IMMDevice* DemoApp::GetDefaultRenderDevice()
 
 	SafeRelease(&deviceEnumerator);
 	return device;
+}
+
+void DemoApp::WriteCaptureBufferToRenderBuffer()
+{
+	//size - currentPosition + start
+	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - (int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer;
+	size_t amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
+	//stop after we swap buffers on the capturer
+	//this should eventually be where we create a new render buffer
+	if (amountThatNeedsToBeWritten <= 0)
+		renderer->Stop();
+
+	//write what we can to the current buffer
+	while (amountThatNeedsToBeWritten > amountThatCanBewrittenInCurrentBuffer)
+	{
+		//write as much as possible into this buffer
+		memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatCanBewrittenInCurrentBuffer);
+
+		//get the necessary information for writing to the next buffer
+		amountThatNeedsToBeWritten -= amountThatCanBewrittenInCurrentBuffer;
+		currentRenderBufferBeingWrittenTo = currentRenderBufferBeingWrittenTo->_Next;
+		previousCaptureBufferSize += amountThatCanBewrittenInCurrentBuffer;
+		amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength;
+		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
+	}
+
+	//set up any information that may be needed in the next write
+	memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatNeedsToBeWritten);
+	currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer + amountThatNeedsToBeWritten;
+	previousCaptureBufferSize += amountThatNeedsToBeWritten;
 }
 
 void DemoApp::StartAudioRender(int TargetDurationInSec, int TargetLatency)

@@ -4,6 +4,7 @@
 #include "WinAudioRenderer.h"
 #include <thread>
 #include <dwrite.h>
+#include <vector>
 #pragma comment(lib,"d2d1")
 #pragma comment(lib, "Dwrite")
 
@@ -26,7 +27,8 @@ public:
 	void StopCapture();
 	void StopAudioRender();
 	void StartAudioRender(int TargetDurationInSec, int TargetLatency);
-	void SwapAudioBuffer(int TargetDurationInSec, int TargetLatency);
+	void SwapAudioBuffer();
+	void WriteCaptureBufferToRenderBuffer();
 
 private:
 	// Initialize device-independent resources.
@@ -46,7 +48,7 @@ private:
 	//only call this after calling draw points
 	//because I'm too laze to extract it all
 	void DrawString(int x, int y,const std::wstring& text);
-	float FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds)const;
+	float FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds);
 
 	// Resize the render target.
 	void OnResize(
@@ -70,14 +72,28 @@ private:
 	ID2D1SolidColorBrush* m_pCornflowerBlueBrush;
 	IDWriteFactory* m_pDWriteFactory;
 	IDWriteTextFormat* m_pTextFormat;
+	struct DrawnString
+	{
+		float x, y;
+		const std::wstring text;
+		DrawnString()
+		:text(std::to_wstring(0)){}
+		DrawnString(float x, float y, const std::wstring& text)
+			:x(x), y(y), text(text){}
+	};
+	std::vector<DrawnString> stringsToRender;
 
 	//rendering
 	WinAudioRenderer* renderer;
 	RenderBuffer* renderQueue;
 	RenderBuffer **currentBufferTail;
+	RenderBuffer* currentRenderBufferBeingWrittenTo;
+	BYTE* currentRenderBufferPosition;
+	size_t previousCaptureBufferSize;
 
 	//capturing
 	WinAudioCapture* capturer;
+
 	BYTE *captureBuffer;
 	size_t captureBufferSize;
 	D2D1_SIZE_U windowSize;
