@@ -53,6 +53,7 @@ public:
     UINT32 BufferSizePerPeriod();
     STDMETHOD_(ULONG, AddRef)();
     STDMETHOD_(ULONG, Release)();
+	bool Initialized() { return _Initialized; }
 
 private:
 	~WinAudioRenderer(void);
@@ -72,6 +73,7 @@ private:
     RenderSampleType _RenderSampleType;
     UINT32      _BufferSize;
     LONG        _EngineLatencyInMS;
+	bool		_Initialized;
 
     //
     //  Render buffer management.

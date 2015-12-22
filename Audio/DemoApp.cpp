@@ -2,6 +2,11 @@
 #include "stdafx.h"
 
 #define BACKGROUND_NOISE_VOLUME 0.001f
+//need to know what this actually is
+#define TARGET_LATENCY 30
+//buffer durations in seconds
+//basically allocate a buffer of this amount of time
+#define BUFFER_DURATION_IN_SECONDS 10
 
 void UpdateLoop(DemoApp*);
 
@@ -32,7 +37,7 @@ captureBuffer(NULL)
 	device = GetDefaultRenderDevice();
 	if (device)
 	{
-		WinAudioRenderer *renderer = new (std::nothrow) WinAudioRenderer(device, true, eConsole);
+		renderer = new (std::nothrow) WinAudioRenderer(device, true, eConsole);
 		if (renderer == NULL)
 		{
 			LOGERROR("Unable to allocate renderer/n");
@@ -61,6 +66,20 @@ DemoApp::~DemoApp()
 		SafeRelease(&renderer);
 	}
 
+	//renderQueue is a circularly linked list
+	// just delete the next one until we get to the first one
+	if (renderQueue)
+	{
+		RenderBuffer *current, *next = renderQueue->_Next;
+		while (next != renderQueue)
+		{
+			current = next;
+			next = current->_Next;
+			delete current;
+		}
+		delete renderQueue;
+	}
+
 	SafeRelease(&m_pDirect2dFactory);
 	SafeRelease(&m_pDWriteFactory);
 	SafeRelease(&m_pTextFormat);
@@ -70,6 +89,7 @@ DemoApp::~DemoApp()
 
 }
 
+#pragma region Windows Calls
 void DemoApp::RunMessageLoop()
 {
 	MSG msg;
@@ -355,6 +375,7 @@ void DemoApp::OnResize(UINT width, UINT height)
 		m_pRenderTarget->Resize(D2D1::SizeU(width, height));
 	}
 }
+#pragma endregion
 
 void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCount)
 {
@@ -394,7 +415,6 @@ void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCoun
 
 		m_pRenderTarget->DrawGeometry(geometry, m_pCornflowerBlueBrush, 5);
 
-		//static const WCHAR renderText[] = text.c_str();
 		size_t stringCount = stringsToRender.size();
 		for (size_t i = 0; i < stringCount; i++)
 		{
@@ -426,15 +446,24 @@ void DemoApp::Update()
 {
 	if (m_hwnd == NULL)
 		return;
-
-	static int count = 0;
-	//OnRender(count++);
 	if (capturer->initialized)
+	{
 		RenderWaveData(reinterpret_cast<float*>(captureBuffer), capturer->BytesCaptured(), capturer->ChannelCount());
+
+		if (renderer->Initialized())
+			WriteCaptureBufferToRenderBuffer();
+		else
+		{
+			//because magic numbers that I really need to look up
+			renderer->Initialize(TARGET_LATENCY);
+			CreateRenderQueue(BUFFER_DURATION_IN_SECONDS);
+			renderer->Start(renderQueue);
+		}
+	}
 
 	//swap our buffers when we get close to filling up the current buffer
 	if (captureBufferSize * 0.9f < capturer->BytesCaptured())
-		SwapAudioBuffer();
+		ResetCaptureBuffer();
 }
 
 void UpdateLoop(DemoApp* app)
@@ -442,22 +471,24 @@ void UpdateLoop(DemoApp* app)
 	int timer = 0;
 	while (!app->finished)
 	{
-		app->Update();
+		//let a frame pass after start before calling update
 		Sleep(16);
+		app->Update();
 	}
 }
 
 void DemoApp::Start()
 {
-	//magic numbers yay!
-	//really need to test these
-	StartCapture(10, 20);
+	StartCapture(BUFFER_DURATION_IN_SECONDS, TARGET_LATENCY);
 }
 
-void DemoApp::SwapAudioBuffer()
+void DemoApp::ResetCaptureBuffer()
 {
 	if (capturer->initialized && captureBuffer != NULL)
 	{
+		//make sure to write any extra data that may have been capture before moving
+		//back to the beginning of the array
+		WriteCaptureBufferToRenderBuffer();
 		capturer->SwitchBuffer(captureBuffer, captureBufferSize);
 	}
 }
@@ -632,10 +663,14 @@ void DemoApp::WriteCaptureBufferToRenderBuffer()
 	//size - currentPosition + start
 	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - (int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer;
 	size_t amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
-	//stop after we swap buffers on the capturer
-	//this should eventually be where we create a new render buffer
-	if (amountThatNeedsToBeWritten <= 0)
-		renderer->Stop();
+
+	//a negative number likely indicates the buffer was swapped or reset
+	//in this case start reading from the start of the new buffer
+	if (amountThatNeedsToBeWritten < 0)
+	{
+		amountThatNeedsToBeWritten = capturer->BytesCaptured();
+		previousCaptureBufferSize = 0;
+	}
 
 	//write what we can to the current buffer
 	while (amountThatNeedsToBeWritten > amountThatCanBewrittenInCurrentBuffer)
@@ -657,10 +692,10 @@ void DemoApp::WriteCaptureBufferToRenderBuffer()
 	previousCaptureBufferSize += amountThatNeedsToBeWritten;
 }
 
-void DemoApp::StartAudioRender(int TargetDurationInSec, int TargetLatency)
+void DemoApp::CreateRenderQueue(int BufferDurationInSeconds)
 {
 
-	if (renderer->Initialize(TargetLatency))
+	if (renderer->Initialized())
 	{
 		//
 		//  We've initialized the renderer.  Once we've done that, we know some information about the
@@ -671,14 +706,14 @@ void DemoApp::StartAudioRender(int TargetDurationInSec, int TargetLatency)
 		//  we're going to have TargetDuration*samples/second frames multiplied by the frame size.
 		//
 		UINT32 renderBufferSizeInBytes = (renderer->BufferSizePerPeriod()  * renderer->FrameSize());
-		size_t renderDataLength = (renderer->SamplesPerSecond() * TargetDurationInSec * renderer->FrameSize()) + (renderBufferSizeInBytes - 1);
+		size_t renderDataLength = (renderer->SamplesPerSecond() * BufferDurationInSeconds * renderer->FrameSize()) + (renderBufferSizeInBytes - 1);
 		size_t renderBufferCount = renderDataLength / (renderBufferSizeInBytes);
 		//
 		//  Render buffer queue. Because we need to insert each buffer at the end of the linked list instead of at the head, 
 		//  we keep a pointer to a pointer to the variable which holds the tail of the current list in currentBufferTail.
 		//
 		renderQueue = NULL;
-		currentBufferTail = &renderQueue;
+		RenderBuffer **currentBufferTail = &renderQueue;
 
 		double theta = 0;
 
@@ -704,11 +739,12 @@ void DemoApp::StartAudioRender(int TargetDurationInSec, int TargetLatency)
 			currentBufferTail = &renderBuffer->_Next;
 		}
 
-		//
-		//  The renderer takes ownership of the render queue - it will free the items in the queue when it renders them.
-		//
-		renderer->Start(renderQueue);
+		//make the end of the render queue point to the start of the render queue
+		//making it a circular linked list
+		*currentBufferTail = renderQueue;
 	}
+	else
+		LOGERROR("Renderer has not been initialized. Please initialize it before starting it");
 }
 
 void DemoApp::StopAudioRender()

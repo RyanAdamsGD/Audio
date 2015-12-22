@@ -30,7 +30,8 @@ WinAudioRenderer::WinAudioRenderer(IMMDevice *Endpoint, bool EnableStreamSwitch,
     _StreamSwitchCompleteEvent(NULL),
     _AudioSessionControl(NULL),
     _DeviceEnumerator(NULL),
-    _InStreamSwitch(false)
+    _InStreamSwitch(false),
+	_Initialized(false)
 {
     _Endpoint->AddRef();    // Since we're holding a copy of the endpoint, take a reference to it.  It'll be released in Shutdown();
 }
@@ -80,7 +81,7 @@ bool WinAudioRenderer::InitializeAudioEngine()
     hr = _AudioClient->GetService(IID_PPV_ARGS(&_RenderClient));
     if (FAILED(hr))
     {
-        printf("Unable to get new render client: %x.\n", hr);
+        LOGERROR("Unable to get new render client: %x.\n", hr);
         return false;
     }
 
@@ -242,6 +243,7 @@ bool WinAudioRenderer::Initialize(UINT32 EngineLatency)
         }
     }
 
+	_Initialized = true;
     return true;
 }
 
@@ -325,7 +327,7 @@ bool WinAudioRenderer::Start(RenderBuffer *RenderBufferQueue)
             CopyMemory(pData, renderBuffer->_Buffer, renderBuffer->_BufferLength);
             hr = _RenderClient->ReleaseBuffer(bufferLengthInFrames, 0);
 
-            delete renderBuffer;
+            //delete renderBuffer;
         }
         else
         {

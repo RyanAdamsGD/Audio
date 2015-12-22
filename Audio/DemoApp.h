@@ -26,9 +26,7 @@ public:
 	bool StartCapture(int TargetDurationInSec, int TargetLatency);
 	void StopCapture();
 	void StopAudioRender();
-	void StartAudioRender(int TargetDurationInSec, int TargetLatency);
-	void SwapAudioBuffer();
-	void WriteCaptureBufferToRenderBuffer();
+	void CreateRenderQueue(int BufferDurationInSeconds);
 
 private:
 	// Initialize device-independent resources.
@@ -86,10 +84,11 @@ private:
 	//rendering
 	WinAudioRenderer* renderer;
 	RenderBuffer* renderQueue;
-	RenderBuffer **currentBufferTail;
 	RenderBuffer* currentRenderBufferBeingWrittenTo;
 	BYTE* currentRenderBufferPosition;
 	size_t previousCaptureBufferSize;
+	//copies the data from the capturer into the render buffer
+	void WriteCaptureBufferToRenderBuffer();
 
 	//capturing
 	WinAudioCapture* capturer;
@@ -97,5 +96,7 @@ private:
 	BYTE *captureBuffer;
 	size_t captureBufferSize;
 	D2D1_SIZE_U windowSize;
+	//has the capturer start writing over the old data
+	void ResetCaptureBuffer();
 };
 
