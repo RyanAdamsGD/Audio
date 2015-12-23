@@ -18,7 +18,10 @@ m_pLightSlateGrayBrush(NULL),
 m_pCornflowerBlueBrush(NULL),
 updateLoop(UpdateLoop, this),
 finished(false),
-captureBuffer(NULL)
+captureBuffer(NULL),
+renderer(NULL),
+renderQueue(NULL),
+currentRenderBufferBeingWrittenTo(NULL)
 {
 	_CrtSetReportMode;
 	IMMDevice* device = GetDefaultCaptureDevice();
@@ -31,7 +34,6 @@ captureBuffer(NULL)
 			return;
 		}
 	}
-	else
 
 
 	device = GetDefaultRenderDevice();
@@ -377,6 +379,7 @@ void DemoApp::OnResize(UINT width, UINT height)
 }
 #pragma endregion
 
+#pragma region Drawing
 void DemoApp::DrawPoints(D2D1_POINT_2F** const points, int size, int channelCount)
 {
 	HRESULT hr = S_OK;
@@ -441,6 +444,7 @@ void DemoApp::DrawString(int x, int y, const std::wstring& text)
 {
 	stringsToRender.push_back(DrawnString(x, y, text));
 }
+#pragma endregion
 
 void DemoApp::Update()
 {
@@ -577,6 +581,7 @@ float DemoApp::FindFrequencyInHerz(const float* const data, int size, float samp
 	return numberOfPeriods / sampleDurationInSeconds;
 }
 
+#pragma region Capture Device
 IMMDevice* DemoApp::GetDefaultCaptureDevice()
 {
 	HRESULT hr;
@@ -657,12 +662,20 @@ IMMDevice* DemoApp::GetDefaultRenderDevice()
 	SafeRelease(&deviceEnumerator);
 	return device;
 }
+#pragma endregion
 
 void DemoApp::WriteCaptureBufferToRenderBuffer()
 {
+	//initialize these values if needed
+	if (currentRenderBufferBeingWrittenTo == NULL)
+	{
+		currentRenderBufferBeingWrittenTo = renderQueue;
+		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
+	}
+
 	//size - currentPosition + start
-	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - (int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer;
-	size_t amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
+	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - ((int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer);
+	long amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
 
 	//a negative number likely indicates the buffer was swapped or reset
 	//in this case start reading from the start of the new buffer
@@ -692,6 +705,7 @@ void DemoApp::WriteCaptureBufferToRenderBuffer()
 	previousCaptureBufferSize += amountThatNeedsToBeWritten;
 }
 
+#pragma region Render Device
 void DemoApp::CreateRenderQueue(int BufferDurationInSeconds)
 {
 
@@ -751,3 +765,4 @@ void DemoApp::StopAudioRender()
 {
 	renderer->Stop();
 }
+#pragma endregion

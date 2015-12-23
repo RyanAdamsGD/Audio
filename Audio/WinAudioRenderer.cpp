@@ -398,17 +398,6 @@ void WinAudioRenderer::Stop()
         CloseHandle(_RenderThread);
         _RenderThread = NULL;
     }
-
-    //
-    //  Drain the buffers in the render buffer queue.
-    //
-    while (_RenderBufferQueue != NULL)
-    {
-        RenderBuffer *renderBuffer = _RenderBufferQueue;
-        _RenderBufferQueue = renderBuffer->_Next;
-        delete renderBuffer;
-    }
-
 }
 
 
@@ -520,7 +509,7 @@ DWORD WinAudioRenderer::DoRenderThread()
                     //
                     //  We're done with this set of samples, free it.
                     //
-                    delete renderBuffer;
+                    //delete renderBuffer;
                 }
             }
             break;
