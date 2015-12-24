@@ -8,6 +8,8 @@
 //buffer durations in seconds
 //basically allocate a buffer of this amount of time
 #define BUFFER_DURATION_IN_SECONDS 10
+//Not adjusting waves that are at 4800Hz or more
+#define MINIMUM_SAMPLES_PER_PERIOD 5
 
 void UpdateLoop(DemoApp*);
 
@@ -530,14 +532,14 @@ void DemoApp::RenderWaveData(float* data, int size, int channelCount)
 	DrawString(windowSize.width - 50, -25, std::to_wstring(amountThatWillBeDrawn));
 
 	float sampleDurationInSeconds = (float)amountThatWillBeDrawn / capturer->SamplesPerSecond();
-	FindFrequencyInHerz((data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds);
+	FindFrequencyInHerz((data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds, channelCount);
 	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;
 }
 
-void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds)
+void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds, int channelCount)
 {
 	if (size < 2)
 		return;
@@ -549,31 +551,50 @@ void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInS
 	std::vector<int> samplesPerPeriod;
 	samplesPerPeriod.reserve(100);
 	int periodCount = 0;
-	int previousValueWasIgnoredCount = 0;
+	int increasingSampleCount = 0;
+	int previousValuesWereBackgroundCount = 0;
 
-	for (size_t i = 1; i < size; i++)
+	for (size_t i = channelCount; i < size; i += channelCount)
 	{
-		if (abs(data[i]) < BACKGROUND_NOISE_VOLUME && abs(data[i]) - abs(data[i-1]) < BACKGROUND_NOISE_VOLUME * 0.5f)
-		{
-			//should do some logic here to not include background noise
-			//and do extra calculations because of it
-			previousValueWasIgnoredCount++;
-			continue;
-		}
+		increasing = data[i - channelCount] < data[i];
 
-		increasing = data[i-1] < data[i];
-		if (increasing && previousState != increasing)
+		if (increasing)
 		{
+			if (abs(data[i]) < BACKGROUND_NOISE_VOLUME)
+			{
+				previousValuesWereBackgroundCount++;
+				continue;
+			}
+
+			increasingSampleCount = increasingSampleCount > 0 ? increasingSampleCount+1 : 1;
+			//going to play with this number, in lower frequency wave there may potentially be more
+			//samples caught in background noise that are actually relevant to the wave
+			if (previousValuesWereBackgroundCount < 2)
+				increasingSampleCount += previousValuesWereBackgroundCount;
+		}
+		else if (increasingSampleCount > 0 && previousState != increasing && increasingSampleCount > MINIMUM_SAMPLES_PER_PERIOD)
+		{
+			int samplesThisPeriod = increasingSampleCount * 2;
 			if (periodCount == 0)
-				samplesPerPeriod.push_back(i - previousValueWasIgnoredCount);
+			{
+				bool sampleStartsAtBeginingOfArray = samplesThisPeriod < i;
+				samplesPerPeriod.push_back(sampleStartsAtBeginingOfArray ? i : samplesThisPeriod);
+				periodStartIndex.push_back(sampleStartsAtBeginingOfArray ? 0 : samplesThisPeriod);
+			}
 			else
-				samplesPerPeriod.push_back(i - periodStartIndex[periodCount-1] - previousValueWasIgnoredCount);
+			{
+				samplesPerPeriod.push_back(samplesThisPeriod);
+				periodStartIndex.push_back(i - samplesThisPeriod);
+			}
 
-			periodStartIndex.push_back(i);
-			amplitudesDuringEachPeriod.push_back(abs(data[i - 1]));
+			amplitudesDuringEachPeriod.push_back(data[i - channelCount]);
 			periodCount++;
-			previousValueWasIgnoredCount = 0;
 		}
+		else
+		{
+			increasingSampleCount = 0;
+		}
+
 		previousState = increasing;
 	}
 
@@ -590,12 +611,12 @@ void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInS
 	float targetHz, durationInSeconds;
 	for (size_t i = 1; i < samplesPerPeriodSize; i++)
 	{
-		durationInSeconds = (float)(samplesPerPeriod[i])/ samplesPerSecond;
-		targetHz = (1.0f / durationInSeconds) + 80;
+		durationInSeconds = (float)(samplesPerPeriod[i]) / samplesPerSecond;
+		targetHz = (1.0f / durationInSeconds) + 800;
 		if (i == 0)
-			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, 0);
+			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, 0, channelCount);
 		else
-			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, data[periodStartIndex[i] - 1] / amplitudesDuringEachPeriod[i-1]);
+			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, data[periodStartIndex[i] - 1],channelCount);
 	}
 }
 
