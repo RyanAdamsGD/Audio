@@ -1,5 +1,6 @@
 #include "DemoApp.h"
 #include "stdafx.h"
+#include "ToneGenerator.h"
 
 #define BACKGROUND_NOISE_VOLUME 0.001f
 //need to know what this actually is
@@ -23,7 +24,9 @@ renderer(NULL),
 renderQueue(NULL),
 currentRenderBufferBeingWrittenTo(NULL)
 {
+#if DEBUG
 	_CrtSetReportMode;
+#endif
 	IMMDevice* device = GetDefaultCaptureDevice();
 	if (device)
 	{
@@ -497,7 +500,7 @@ void DemoApp::ResetCaptureBuffer()
 	}
 }
 
-void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
+void DemoApp::RenderWaveData(float* data, int size, int channelCount)
 {
 	size = size / sizeof(float);
 	float unitsPerSoundPoint = 1;
@@ -527,31 +530,30 @@ void DemoApp::RenderWaveData(const float* data, int size, int channelCount)
 	DrawString(windowSize.width - 50, -25, std::to_wstring(amountThatWillBeDrawn));
 
 	float sampleDurationInSeconds = (float)amountThatWillBeDrawn / capturer->SamplesPerSecond();
-	float frequency = FindFrequencyInHerz(reinterpret_cast<const float*>(data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds);
-	DrawString(0, 0, std::to_wstring(frequency));
+	FindFrequencyInHerz((data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds);
 	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;
 }
 
-float DemoApp::FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds)
+void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds)
 {
 	if (size < 2)
-		return 0;
+		return;
 
-	bool wasPositive = false;
-	bool previousState = false;
-	int numberOfCrestsAndTroughs = 0;
-	int previousCrestOrTroughIndex = 0;
-	std::vector<float> samplesPerPeriod;
-	samplesPerPeriod.reserve(1000);
-	int samplesPerPeriodIndex = 0;
+	bool increasing = data[1] - data[0];
+	bool previousState = increasing;
+	std::vector<float> amplitudesDuringEachPeriod;
+	std::vector<int> periodStartIndex;
+	std::vector<int> samplesPerPeriod;
+	samplesPerPeriod.reserve(100);
+	int periodCount = 0;
 	int previousValueWasIgnoredCount = 0;
 
 	for (size_t i = 1; i < size; i++)
 	{
-		if (data[i] < BACKGROUND_NOISE_VOLUME && data[i] > -BACKGROUND_NOISE_VOLUME)
+		if (abs(data[i]) < BACKGROUND_NOISE_VOLUME && abs(data[i]) - abs(data[i-1]) < BACKGROUND_NOISE_VOLUME * 0.5f)
 		{
 			//should do some logic here to not include background noise
 			//and do extra calculations because of it
@@ -559,14 +561,20 @@ float DemoApp::FindFrequencyInHerz(const float* const data, int size, float samp
 			continue;
 		}
 
-		wasPositive = 0.0f > data[i];
-		if (previousState != wasPositive)
+		increasing = data[i-1] < data[i];
+		if (increasing && previousState != increasing)
 		{
-			samplesPerPeriod.push_back(0);
-			numberOfCrestsAndTroughs++;
-			previousState = wasPositive;
-			samplesPerPeriod[samplesPerPeriodIndex] = i;
+			if (periodCount == 0)
+				samplesPerPeriod.push_back(i - previousValueWasIgnoredCount);
+			else
+				samplesPerPeriod.push_back(i - periodStartIndex[periodCount-1] - previousValueWasIgnoredCount);
+
+			periodStartIndex.push_back(i);
+			amplitudesDuringEachPeriod.push_back(abs(data[i - 1]));
+			periodCount++;
+			previousValueWasIgnoredCount = 0;
 		}
+		previousState = increasing;
 	}
 
 	int averageSamplesPerPeriod = 0;
@@ -577,8 +585,59 @@ float DemoApp::FindFrequencyInHerz(const float* const data, int size, float samp
 		averageSamplesPerPeriod /= samplesPerPeriodSize;
 	DrawString(0, 20, std::to_wstring(averageSamplesPerPeriod));
 
-	int numberOfPeriods = numberOfCrestsAndTroughs * 0.5f;
-	return numberOfPeriods / sampleDurationInSeconds;
+
+	int samplesPerSecond = capturer->SamplesPerSecond();
+	float targetHz, durationInSeconds;
+	for (size_t i = 1; i < samplesPerPeriodSize; i++)
+	{
+		durationInSeconds = (float)(samplesPerPeriod[i])/ samplesPerSecond;
+		targetHz = (1.0f / durationInSeconds) + 80;
+		if (i == 0)
+			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, 0);
+		else
+			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, data[periodStartIndex[i] - 1] / amplitudesDuringEachPeriod[i-1]);
+	}
+}
+
+void DemoApp::WriteCaptureBufferToRenderBuffer()
+{
+	//initialize these values if needed
+	if (currentRenderBufferBeingWrittenTo == NULL)
+	{
+		currentRenderBufferBeingWrittenTo = renderQueue;
+		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
+	}
+
+	//size - currentPosition + start
+	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - ((int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer);
+	long amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
+
+	//a negative number likely indicates the buffer was swapped or reset
+	//in this case start reading from the start of the new buffer
+	if (amountThatNeedsToBeWritten < 0)
+	{
+		amountThatNeedsToBeWritten = capturer->BytesCaptured();
+		previousCaptureBufferSize = 0;
+	}
+
+	//write what we can to the current buffer
+	while (amountThatNeedsToBeWritten > amountThatCanBewrittenInCurrentBuffer)
+	{
+		//write as much as possible into this buffer
+		memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatCanBewrittenInCurrentBuffer);
+
+		//get the necessary information for writing to the next buffer
+		amountThatNeedsToBeWritten -= amountThatCanBewrittenInCurrentBuffer;
+		currentRenderBufferBeingWrittenTo = currentRenderBufferBeingWrittenTo->_Next;
+		previousCaptureBufferSize += amountThatCanBewrittenInCurrentBuffer;
+		amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength;
+		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
+	}
+
+	//set up any information that may be needed in the next write
+	memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatNeedsToBeWritten);
+	currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer + amountThatNeedsToBeWritten;
+	previousCaptureBufferSize += amountThatNeedsToBeWritten;
 }
 
 #pragma region Capture Device
@@ -663,47 +722,6 @@ IMMDevice* DemoApp::GetDefaultRenderDevice()
 	return device;
 }
 #pragma endregion
-
-void DemoApp::WriteCaptureBufferToRenderBuffer()
-{
-	//initialize these values if needed
-	if (currentRenderBufferBeingWrittenTo == NULL)
-	{
-		currentRenderBufferBeingWrittenTo = renderQueue;
-		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
-	}
-
-	//size - currentPosition + start
-	size_t amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength - ((int)currentRenderBufferPosition - (int)currentRenderBufferBeingWrittenTo->_Buffer);
-	long amountThatNeedsToBeWritten = capturer->BytesCaptured() - previousCaptureBufferSize;
-
-	//a negative number likely indicates the buffer was swapped or reset
-	//in this case start reading from the start of the new buffer
-	if (amountThatNeedsToBeWritten < 0)
-	{
-		amountThatNeedsToBeWritten = capturer->BytesCaptured();
-		previousCaptureBufferSize = 0;
-	}
-
-	//write what we can to the current buffer
-	while (amountThatNeedsToBeWritten > amountThatCanBewrittenInCurrentBuffer)
-	{
-		//write as much as possible into this buffer
-		memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatCanBewrittenInCurrentBuffer);
-
-		//get the necessary information for writing to the next buffer
-		amountThatNeedsToBeWritten -= amountThatCanBewrittenInCurrentBuffer;
-		currentRenderBufferBeingWrittenTo = currentRenderBufferBeingWrittenTo->_Next;
-		previousCaptureBufferSize += amountThatCanBewrittenInCurrentBuffer;
-		amountThatCanBewrittenInCurrentBuffer = currentRenderBufferBeingWrittenTo->_BufferLength;
-		currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer;
-	}
-
-	//set up any information that may be needed in the next write
-	memcpy(currentRenderBufferPosition, captureBuffer + previousCaptureBufferSize, amountThatNeedsToBeWritten);
-	currentRenderBufferPosition = currentRenderBufferBeingWrittenTo->_Buffer + amountThatNeedsToBeWritten;
-	previousCaptureBufferSize += amountThatNeedsToBeWritten;
-}
 
 #pragma region Render Device
 void DemoApp::CreateRenderQueue(int BufferDurationInSeconds)

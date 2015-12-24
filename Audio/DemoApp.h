@@ -40,13 +40,13 @@ private:
 	
 	IMMDevice* GetDefaultCaptureDevice();
 	IMMDevice* GetDefaultRenderDevice();
-	void RenderWaveData(const float* data, int size, int channelCount);
+	void RenderWaveData(float* data, int size, int channelCount);
 	void DrawPoints(D2D1_POINT_2F** const data, int size, int channelCount);
 	void Start();
 	//only call this after calling draw points
 	//because I'm too laze to extract it all
 	void DrawString(int x, int y,const std::wstring& text);
-	float FindFrequencyInHerz(const float* const data, int size, float sampleDurationInSeconds);
+	void FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds);
 
 	// Resize the render target.
 	void OnResize(

@@ -3,7 +3,7 @@ class ToneGenerator
 {
 public:
 	ToneGenerator();
-	void GenerateSineWave(float* data, float Hz, float durationInSeconds, int samplesPerSecond, float start)const;
+	static void GenerateSineWave(float* data, float Hz, float Volume, float durationInSeconds, int samplesPerSecond, float start);
 	void GenerateSineWave(float* data, float Hz, int size, int samplesPerSecond, float start)const;
 private:
 	~ToneGenerator();
