@@ -46,7 +46,7 @@ private:
 	//only call this after calling draw points
 	//because I'm too laze to extract it all
 	void DrawString(int x, int y,const std::wstring& text);
-	void FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds, int channelCount);
+	void FindFrequencyInHerz(float* data, int size, int channelCount);
 
 	// Resize the render target.
 	void OnResize(

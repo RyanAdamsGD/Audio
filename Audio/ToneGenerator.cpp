@@ -1,6 +1,6 @@
 #include "ToneGenerator.h"
 #include <math.h>
-
+#define ONLY_WRITE_TO_ONE_CHANNEL
 
 ToneGenerator::ToneGenerator()
 {
@@ -21,9 +21,13 @@ void ToneGenerator::GenerateSineWave(float* data, float Hz, float Volume, float 
 	for (size_t i = 0; i < numberOfSamples; i++)
 	{
 		value = sin(Hz * (startx + (incrementPerSample * i))) * Volume;
-		for (size_t j = 0; j < channelCount; j++)
+#ifdef ONLY_WRITE_TO_ONE_CHANNEL
+		for (size_t j = 0; j < 1; j++, data+=channelCount)
+#else
+		for (size_t j = 0; j < channelCount; j++, data++)
+#endif
 		{
-			data[(i * channelCount) + j] = value;
+			*data = value;
 		}
 	}
 }

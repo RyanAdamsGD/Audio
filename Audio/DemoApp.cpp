@@ -457,6 +457,7 @@ void DemoApp::Update()
 		return;
 	if (capturer->initialized)
 	{
+		FindFrequencyInHerz(reinterpret_cast<float*>(captureBuffer + previousCaptureBufferSize), capturer->BytesCaptured() - previousCaptureBufferSize, capturer->ChannelCount());
 		RenderWaveData(reinterpret_cast<float*>(captureBuffer), capturer->BytesCaptured(), capturer->ChannelCount());
 
 		if (renderer->Initialized())
@@ -530,27 +531,24 @@ void DemoApp::RenderWaveData(float* data, int size, int channelCount)
 
 
 	DrawString(windowSize.width - 50, -25, std::to_wstring(amountThatWillBeDrawn));
-
-	float sampleDurationInSeconds = (float)amountThatWillBeDrawn / capturer->SamplesPerSecond();
-	FindFrequencyInHerz((data + (size - amountThatWillBeDrawn)), amountThatWillBeDrawn, sampleDurationInSeconds, channelCount);
-	DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
+		DrawPoints(channelPoints, amountThatWillBeDrawn, channelCount);
 	for (int i = 0; i < channelCount; i++)
 		delete channelPoints[i];
 	delete channelPoints;
 }
 
-void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInSeconds, int channelCount)
+void DemoApp::FindFrequencyInHerz(float* data, int size, int channelCount)
 {
 	if (size < 2)
 		return;
 
-	bool increasing = data[1] - data[0];
-	bool previousState = increasing;
+	bool increasing, previousState;
 	std::vector<float> amplitudesDuringEachPeriod;
 	std::vector<int> periodStartIndex;
 	std::vector<int> samplesPerPeriod;
 	samplesPerPeriod.reserve(100);
-	int periodCount = 0;
+	amplitudesDuringEachPeriod.reserve(100);
+	periodStartIndex.reserve(100);
 	int increasingSampleCount = 0;
 	int previousValuesWereBackgroundCount = 0;
 
@@ -569,17 +567,20 @@ void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInS
 			increasingSampleCount = increasingSampleCount > 0 ? increasingSampleCount+1 : 1;
 			//going to play with this number, in lower frequency wave there may potentially be more
 			//samples caught in background noise that are actually relevant to the wave
-			if (previousValuesWereBackgroundCount < 2)
+			if (previousValuesWereBackgroundCount <= 2)
+			{
 				increasingSampleCount += previousValuesWereBackgroundCount;
+				previousValuesWereBackgroundCount = 0;
+			}
 		}
 		else if (increasingSampleCount > 0 && previousState != increasing && increasingSampleCount > MINIMUM_SAMPLES_PER_PERIOD)
 		{
-			int samplesThisPeriod = increasingSampleCount * 2;
-			if (periodCount == 0)
+			int samplesThisPeriod = increasingSampleCount * 2 * channelCount;
+			if (amplitudesDuringEachPeriod.size() == 0)
 			{
 				bool sampleStartsAtBeginingOfArray = samplesThisPeriod < i;
 				samplesPerPeriod.push_back(sampleStartsAtBeginingOfArray ? i : samplesThisPeriod);
-				periodStartIndex.push_back(sampleStartsAtBeginingOfArray ? 0 : samplesThisPeriod);
+				periodStartIndex.push_back(sampleStartsAtBeginingOfArray ? 0 : i - samplesThisPeriod);
 			}
 			else
 			{
@@ -588,7 +589,6 @@ void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInS
 			}
 
 			amplitudesDuringEachPeriod.push_back(data[i - channelCount]);
-			periodCount++;
 		}
 		else
 		{
@@ -611,8 +611,8 @@ void DemoApp::FindFrequencyInHerz(float* data, int size, float sampleDurationInS
 	float targetHz, durationInSeconds;
 	for (size_t i = 1; i < samplesPerPeriodSize; i++)
 	{
-		durationInSeconds = (float)(samplesPerPeriod[i]) / samplesPerSecond;
-		targetHz = (1.0f / durationInSeconds) + 800;
+		durationInSeconds = (float)(samplesPerPeriod[i]) / samplesPerSecond / channelCount;
+		targetHz = (1.0f / durationInSeconds);
 		if (i == 0)
 			ToneGenerator::GenerateSineWave(&data[periodStartIndex[i]], targetHz, amplitudesDuringEachPeriod[i], durationInSeconds, samplesPerSecond, 0, channelCount);
 		else
